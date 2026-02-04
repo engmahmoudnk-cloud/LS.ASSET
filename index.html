@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Asset QR Scanner</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .row { display: grid; grid-template-columns: 200px 1fr; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee; }
+    .label { color: #555; }
+    .value { font-weight: 600; word-break: break-word; }
+    #reader { width: 100%; max-width: 440px; }
+    button { padding: 10px 14px; font-size: 16px; margin-right: 8px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin-top: 12px; }
+    .error { color: #b00020; font-weight: 700; }
+    .ok { color: #0a7; font-weight: 700; }
+    .muted { color:#666; }
+    input { padding: 10px 12px; font-size: 16px; width: 100%; max-width: 440px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Asset QR Scanner</h2>
+  <div class="muted">Scan an asset QR code to view all related information.</div>
+
+  <div class="card">
+    <button id="btnStart">Start Scan</button>
+    <button id="btnStop" disabled>Stop</button>
+    <div id="status" style="margin-top:10px;"></div>
+
+    <div style="margin-top:12px;">
+      <div class="muted">Fallback (manual search): paste the FULL UNIQUE ASSET TAG here:</div>
+      <input id="manualInput" placeholder="e.g., WS-ABC-0001" />
+      <button id="btnFind" style="margin-top:10px;">Find</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="reader"></div>
+  </div>
+
+  <div class="card">
+    <h3>Asset Details</h3>
+    <div id="result"></div>
+  </div>
+
+  <!-- Scanner library -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <script>
+    // Load your asset dictionary (Option A)
+    // Place assets.json in the same folder as index.html
+    let ASSETS = {};
+    fetch('./assets.json')
+      .then(r => r.json())
+      .then(data => { ASSETS = data; setStatus("Data loaded (assets.json).", true); })
+      .catch(err => setStatus("Failed to load assets.json. Check hosting/path.", false));
+
+    const statusEl = document.getElementById('status');
+    const resultEl = document.getElementById('result');
+    const btnStart = document.getElementById('btnStart');
+    const btnStop = document.getElementById('btnStop');
+    const manualInput = document.getElementById('manualInput');
+    const btnFind = document.getElementById('btnFind');
+
+    function setStatus(msg, ok) {
+      statusEl.className = ok ? "ok" : "error";
+      statusEl.textContent = msg;
+    }
+
+    function renderRecord(tag) {
+      const key = (tag || "").trim();
+      if (!key) {
+        resultEl.innerHTML = `<div class="error">Empty tag.</div>`;
+        return;
+      }
+
+      const rec = ASSETS[key];
+      if (!rec) {
+        resultEl.innerHTML = `<div class="error">No record found for: ${escapeHtml(key)}</div>`;
+        return;
+      }
+
+      // Expected fields from your Excel headers
+      const fields = [
+        "FULL UNIQUE ASSET TAG","QR CODE","Tag Type","Qty.","Portfolio Name","District Name",
+        "Building Name","Building Area","Floor Name","Asset Type Name","Description",
+        "Country of Origin","System Name"
+      ];
+
+      resultEl.innerHTML = fields
+        .filter(f => rec[f] !== undefined && rec[f] !== null && String(rec[f]).trim() !== "")
+        .map(f => `
+          <div class="row">
+            <div class="label">${escapeHtml(f)}</div>
+            <div class="value">${escapeHtml(String(rec[f]))}</div>
+          </div>
+        `).join("");
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // Scanner setup
+    const html5QrCode = new Html5Qrcode("reader");
+    let scanning = false;
+
+    async function startScan() {
+      if (scanning) return;
+      scanning = true;
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      setStatus("Starting camera…", true);
+
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+      try {
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            setStatus(`Scanned: ${decodedText}`, true);
+            renderRecord(decodedText);
+            stopScan(); // auto-stop after success (edit if you want continuous)
+          },
+          (err) => { /* ignore scan errors */ }
+        );
+        setStatus("Scan active. Point camera at QR code.", true);
+      } catch (e) {
+        scanning = false;
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+        setStatus("Camera start failed. Use HTTPS and allow camera permission.", false);
+      }
+    }
+
+    async function stopScan() {
+      if (!scanning) return;
+      try { await html5QrCode.stop(); } catch (e) {}
+      scanning = false;
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+      setStatus("Scan stopped.", true);
+    }
+
+    btnStart.addEventListener('click', startScan);
+    btnStop.addEventListener('click', stopScan);
+    btnFind.addEventListener('click', () => renderRecord(manualInput.value));
+    manualInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') renderRecord(manualInput.value); });
+  </script>
+</body>
+</html>
